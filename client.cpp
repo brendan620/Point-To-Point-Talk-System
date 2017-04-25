@@ -21,10 +21,31 @@
 #include <stdio.h>
 #include <sstream>
 #include <string.h>
+#include <sys/socket.h>
+#include <netinet/in.h>
 using namespace std;
 
 //Constant to set the buffer size as needed
 #define BUFFER_SIZE 500
+#define MAX_USERS 10
+
+//Structs
+struct tagLocal_Info
+{
+	char name[20];
+	struct timeval startTime;
+	struct timeval lastMsgTime;
+	int numMsg;
+	pid_t pid;
+};
+
+struct tagLocal_Dir
+{
+	tagLocal_Info localInfo[MAX_USERS];
+	int numClients;
+	int totalMsgs;
+
+};
 
 //Prototypes
 
