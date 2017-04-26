@@ -58,7 +58,7 @@ struct local_Dir
                 */
 int main(int argc, char* argv[]){
 	int sockfd;
-	struct sockaddr_in server;
+	struct sockaddr_in server,client;
 	string name;
 	char buffer[BUFFER_SIZE];
 	if(argc != 2)
@@ -71,8 +71,9 @@ int main(int argc, char* argv[]){
 		name = argv[1];
 	}
 
-	if(strlen(buffer)>10){
+	if(name.length()>10){
 		perror("Name is longer than 10 chars");
+		exit(0);
 	}
 
 	if((sockfd=socket(AF_INET,SOCK_STREAM,0))<0){
@@ -82,12 +83,26 @@ int main(int argc, char* argv[]){
 
 	cout << "SOCKET CALL WORKED" << endl;
 
-	
 	server.sin_family = AF_INET;
 	server.sin_addr.s_addr = inet_addr(SERV_HOST_ADDR);
 	//htons == Converts the unsigned short integer hostshort
 	//from host byte order to network byte order
 	server.sin_port = htons(15080);
+
+
+	//SETUP CLIENTS SOCKADDR IN
+	client.sin_family = AF_INET;
+	//htonl == Converts the unsigned integer hostlong from host
+	//byte order to network byte order
+	client.sin_addr.s_addr = htonl(INADDR_ANY);
+	//htons == Converts the unsigned short integer hostshort
+	//from host byte order to network byte order
+	client.sin_port = htons(15082);
+
+	cout << "FAMILY" << client.sin_family << endl;
+	cout << "ADDR"<< client.sin_addr.s_addr << endl;
+	cout << "PORT"<< client.sin_port << endl;
+
 
 	if((connect(sockfd,(struct sockaddr *) &server,sizeof(server)))<0){
 		perror("CONNECT CALL TO THE SERVER FAILED");
@@ -106,8 +121,37 @@ int main(int argc, char* argv[]){
 	}
 	else
 	{
+		bzero(buffer,BUFFER_SIZE);
 		cout << "WRITE TO SERVER WORKED" << endl;
+		cout << "Waiting for a response" << endl;
+		int input;
+		if((input = recv(sockfd,buffer,BUFFER_SIZE,0))<0)
+			{
+				perror("READ CALL FAILED");
+			}
+		else if(input>0)
+			{
+				buffer[input]='\0';
+
+			}
+			if(strcasecmp(buffer,"Ok")==0)
+			{
+
+				cout << "TRYING TO WRITE STRUCT BACK TO THE SERVER" << endl;
+				void *addrPtr=(void *)&client;
+				if((send(sockfd,addrPtr,sizeof(client),0))<0){
+						perror("WRITE TO SERVER FAILED");
+						exit(0);
+					}
+			}
+			else
+			{
+				cout << "Either your name is taken or the maximum number of users are on the server right now" << endl;
+				exit(0);
+			}
 	}
+
+
 
 
 }
