@@ -33,7 +33,7 @@ using namespace std;
 #define SERV_HOST_ADDR "156.12.127.18"
 
 //Structs
-struct tagLocal_Info
+struct local_Info
 {
 	char name[20];
 	struct timeval startTime;
@@ -42,9 +42,9 @@ struct tagLocal_Info
 	pid_t pid;
 };
 
-struct tagLocal_Dir
+struct local_Dir
 {
-	tagLocal_Info localInfo[MAX_USERS];
+	local_Info localInfo[MAX_USERS];
 	int numClients;
 	int totalMsgs;
 
@@ -59,6 +59,21 @@ struct tagLocal_Dir
 int main(int argc, char* argv[]){
 	int sockfd;
 	struct sockaddr_in server;
+	string name;
+	char buffer[BUFFER_SIZE];
+	if(argc != 2)
+	{
+		cout<<"Usage " << argv[0] << " user_name" << endl;
+		exit(0);
+	}
+	else
+	{
+		name = argv[1];
+	}
+
+	if(strlen(buffer)>10){
+		perror("Name is longer than 10 chars");
+	}
 
 	if((sockfd=socket(AF_INET,SOCK_STREAM,0))<0){
 		perror("SERVER CANNOT OPEN SOCKET");
@@ -75,11 +90,24 @@ int main(int argc, char* argv[]){
 	server.sin_port = htons(15080);
 
 	if((connect(sockfd,(struct sockaddr *) &server,sizeof(server)))<0){
-		perror("CONNECT CALL FAILED");
+		perror("CONNECT CALL TO THE SERVER FAILED");
+		exit(0);
 	}
 	else
 	{
-		cout << "CONNECT CALL WORKED" << endl;
+		cout << "CONNECTED TO THE SERVER" << endl;
 	}
+
+	strcpy(buffer,name.c_str());
+
+	if((send(sockfd,buffer,strlen(buffer),0))<0){
+		perror("WRITE TO SERVER FAILED");
+		exit(0);
+	}
+	else
+	{
+		cout << "WRITE TO SERVER WORKED" << endl;
+	}
+
 
 }

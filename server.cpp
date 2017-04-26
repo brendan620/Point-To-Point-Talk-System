@@ -25,6 +25,9 @@
 #include <netdb.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <sys/ipc.h>
+#include <sys/shm.h>
+#include <fcntl.h>
 using namespace std;
 
 //Constant to set the buffer size as needed
@@ -34,7 +37,7 @@ using namespace std;
 //15080-15089
 
 //Structs
-struct tagClient
+struct client
 {
 	char name[20];
 	struct sockaddr_in serverAddr;
@@ -43,9 +46,9 @@ struct tagClient
 	
 };
 
-struct tagDir
+struct dir
 {
-	tagClient clientInfo[MAX_USERS];
+	client clientInfo[MAX_USERS];
 	int numClients;
 };
 //Prototypes
@@ -56,9 +59,20 @@ struct tagDir
                 */
 int main(int argc, char* argv[]){
 
-	int sockfd,cliSockFd;
+	int sockfd,cliSockFd,pid,shmid;
+	void *shmptr;
 	socklen_t cliLen;
 	struct sockaddr_in server,client;
+	char buffer[BUFFER_SIZE];
+	//struct dir directory;
+
+	shmid=shmget(getuid(),1000,IPC_CREAT|0600);
+	shmptr=shmat(shmid,0,0);
+	struct dir *directory=(struct dir*) shmptr;
+
+
+
+	directory->numClients=0;
 
 	if((sockfd=socket(AF_INET,SOCK_STREAM,0))<0){
 		perror("SERVER CANNOT OPEN SOCKET");
@@ -101,6 +115,39 @@ int main(int argc, char* argv[]){
 		{
 			cout << "Accepted connection from: " << cliSockFd << endl;
 		}
+
+		//Child 
+		if((pid=fork())==0)
+		{
+			cout << "Entering the child" << endl;
+			//close(sockfd);
+
+			int input;
+			if((input = recv(cliSockFd,buffer,BUFFER_SIZE,MSG_WAITALL))<0)
+				{
+					perror("READ CALL FAILED");
+				}
+			else if(input>0)
+				{
+					buffer[input]='\0';
+					
+				}
+			//if(directory->numClients==0)
+			//{
+
+				strcpy(directory->clientInfo[directory->numClients].name,buffer);
+				directory->numClients=directory->numClients+1;	
+				cout << "CLIENT " << directory->clientInfo[directory->numClients-1].name << " Number" << directory->numClients << endl;
+
+			//}	
+			
+		}
+		else if(pid<0)
+		{
+			perror("FORK CALLED FAILED");
+		}
+		close(cliSockFd);
+
 	}
 
 }
