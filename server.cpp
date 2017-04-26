@@ -65,7 +65,7 @@ int main(int argc, char* argv[]){
 		exit(0);
 	}
 
-	cout << "SERVER STARTED" << endl;
+	cout << "SOCKET CALL WORKED" << endl;
 
 	//bzero(void *s, size_t n)
 	//erases the data in the n bytes of memory starting

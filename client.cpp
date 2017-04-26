@@ -23,11 +23,14 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <netinet/in.h>
+#include <netdb.h>
+#include <arpa/inet.h>
 using namespace std;
 
 //Constant to set the buffer size as needed
 #define BUFFER_SIZE 500
 #define MAX_USERS 10
+#define SERV_HOST_ADDR "156.12.127.18"
 
 //Structs
 struct tagLocal_Info
@@ -54,5 +57,29 @@ struct tagLocal_Dir
          @return 0 in success
                 */
 int main(int argc, char* argv[]){
+	int sockfd;
+	struct sockaddr_in server;
+
+	if((sockfd=socket(AF_INET,SOCK_STREAM,0))<0){
+		perror("SERVER CANNOT OPEN SOCKET");
+		exit(0);
+	}
+
+	cout << "SOCKET CALL WORKED" << endl;
+
+	
+	server.sin_family = AF_INET;
+	server.sin_addr.s_addr = inet_addr(SERV_HOST_ADDR);
+	//htons == Converts the unsigned short integer hostshort
+	//from host byte order to network byte order
+	server.sin_port = htons(15080);
+
+	if((connect(sockfd,(struct sockaddr *) &server,sizeof(server)))<0){
+		perror("CONNECT CALL FAILED");
+	}
+	else
+	{
+		cout << "CONNECT CALL WORKED" << endl;
+	}
 
 }
