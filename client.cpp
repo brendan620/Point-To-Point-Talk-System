@@ -90,19 +90,6 @@ int main(int argc, char* argv[]){
 	server.sin_port = htons(15080);
 
 
-	//SETUP CLIENTS SOCKADDR IN
-	client.sin_family = AF_INET;
-	//htonl == Converts the unsigned integer hostlong from host
-	//byte order to network byte order
-	client.sin_addr.s_addr = htonl(INADDR_ANY);
-	//htons == Converts the unsigned short integer hostshort
-	//from host byte order to network byte order
-	client.sin_port = htons(15082);
-
-	cout << "FAMILY" << client.sin_family << endl;
-	cout << "ADDR"<< client.sin_addr.s_addr << endl;
-	cout << "PORT"<< client.sin_port << endl;
-
 
 	if((connect(sockfd,(struct sockaddr *) &server,sizeof(server)))<0){
 		perror("CONNECT CALL TO THE SERVER FAILED");
@@ -136,8 +123,14 @@ int main(int argc, char* argv[]){
 			}
 			if(strcasecmp(buffer,"Ok")==0)
 			{
-
-				cout << "TRYING TO WRITE STRUCT BACK TO THE SERVER" << endl;
+				//SETUP CLIENTS SOCKADDR IN
+				client.sin_family = AF_INET;
+				//htonl == Converts the unsigned integer hostlong from host
+				//byte order to network byte order
+				client.sin_addr.s_addr = htonl(INADDR_ANY);
+				//htons == Converts the unsigned short integer hostshort
+				//from host byte order to network byte order
+				client.sin_port = htons(15082);
 				void *addrPtr=(void *)&client;
 				if((send(sockfd,addrPtr,sizeof(client),0))<0){
 						perror("WRITE TO SERVER FAILED");

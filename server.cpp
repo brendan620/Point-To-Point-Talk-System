@@ -51,11 +51,17 @@ struct dir
 {
 	client clientInfo[MAX_USERS];
 	int numClients;
+	int portNums[MAX_USERS];
+	bool portAvailable[MAX_USERS]; 
 };
 
 //Prototypes
 bool addCliToDir(int cliSockFd,char buffer[],struct dir *directory,int semid);
 bool nameNotTaken(char buffer[],struct dir *directory);
+void getAccess(int semid,int semNum);
+void giveAccess(int semid,int semNum);
+void addCliNet(int cliSockFd,struct sockaddr_in *client_info,struct dir *directory,int semid);
+int getFreePort(int semid,int semNum,struct dir *directory);
 /**Main method that starts the application
          @return 0 in success
                 */
@@ -78,14 +84,22 @@ int main(int argc, char* argv[]){
 	//Set the semaphore to open
 	semctl(semid,0,SETVAL,1);
 
+	//Initialize some values in dir
 	directory->numClients=0;
+	int index=0;
+	for(int i=15081;i<15090;i++)
+	{
+
+		directory->portNums[index]=i;
+		directory->portAvailable[index]=true;
+		index++;
+	}
 
 	if((sockfd=socket(AF_INET,SOCK_STREAM,0))<0){
 		perror("SERVER CANNOT OPEN SOCKET");
 		exit(0);
 	}
 
-	cout << "SOCKET CALL WORKED" << endl;
 
 	//bzero(void *s, size_t n)
 	//erases the data in the n bytes of memory starting
@@ -106,7 +120,6 @@ int main(int argc, char* argv[]){
 		perror("BIND CALL FAILED");
 		exit(0);
 	}
-	cout << "BIND CALL WORKED" << endl;
 
 	listen(sockfd,MAX_USERS);
 	cliLen = sizeof(client);
@@ -126,46 +139,40 @@ while(true){
 		//Child
 		if((pid=fork())==0)
 		{
-			cout << "Entering the child" << endl;
 
 			if(addCliToDir(cliSockFd,buffer,directory,semid))
 			{
 				//CLIENT IS OKAY
 				cout << "Client added to directory asking for client sockaddr" << endl;
+
+				//int port=getFreePort(semid,0,directory);
+				//cout << "PORT" << port;
 				bzero(buffer,BUFFER_SIZE);
 				strcpy(buffer,"OK");
-
-				if((send(cliSockFd,buffer,strlen(buffer),0))<0){
+				if((send(cliSockFd,buffer,sizeof(buffer),0))<0){
 					perror("WRITE TO CLIENT FAILED");
 					exit(0);
 				}
 				else
 				{
-					cout << "Wrote client successfully registered message to client" << endl;
 
 					//Getting struct from client
 					int input;
 					bzero(buffer,BUFFER_SIZE);
 					void *ptr;
 					if((input = recv(cliSockFd,&ptr,BUFFER_SIZE,0))<0)
-						{
-							perror("READ CALL FAILED");
-						}
+					{
+						perror("READ CALL FAILED");
+					}
 					else if(input>0)
-						{
-							buffer[input]='\0';
-							cout << "Size of struct buffer " << sizeof(buffer) << endl;
+					{
+						buffer[input]='\0';
 
-						}
+					}
 
-						//memcpy(buffer,(void*) &client,sizeof(&client));
-
-						struct sockaddr_in *test=(struct sockaddr_in*) &ptr;
-						//memcpy(&test,buffer, sizeof(sockaddr_in));
-						cout << "SIZE OF CLIENT SOCKADD_IN" <<  sizeof(test) << endl;
-						cout << test->sin_family << endl;
-						cout << test->sin_addr.s_addr << endl;
-						cout << test->sin_port << endl;
+						struct sockaddr_in *client_info=(struct sockaddr_in*) &ptr;
+						addCliNet(cliSockFd,&client,directory,semid);
+						
 				}
 
 			}
@@ -196,18 +203,15 @@ while(true){
 		{
 
 			close(cliSockFd);
-			//If the semaphore is open
-			if(semctl(semid,0,GETVAL))
-			{
-				//Set the semaphore to closed
-				semctl(semid,0,SETVAL,0);
-				cout << "Parent got in semaphore : num clients incremented in parent" << endl;
-				directory->numClients=directory->numClients+1;
+			//Get access to the semaphore
 
+			getAccess(semid,0);
+			cout << "Parent got in semaphore : num clients incremented in parent" << endl;
+			directory->numClients=directory->numClients+1;
 
-				//Set the semaphore to open
-				semctl(semid,0,SETVAL,1);
-			}
+			//Give access to the semaphore
+			giveAccess(semid,0);
+			
 
 		}
 
@@ -229,31 +233,41 @@ bool addCliToDir(int cliSockFd,char buffer[],struct dir *directory,int semid)
 			buffer[input]='\0';
 
 		}
-		//If the semaphore is open
-		if(semctl(semid,0,GETVAL))
-		{
-			cout << "Child got into semaphore" << endl;
-			cout << "NUM CLIENTS:" << directory->numClients << endl;
-			//Set the semaphore to closed
-			semctl(semid,0,SETVAL,0);
-			if(directory->numClients<10 && nameNotTaken(buffer,directory))
-			{
-				strcpy(directory->clientInfo[directory->numClients-1].name,buffer);
-				//directory->numClients=directory->numClients+1;
-				cout << "CLIENT " << directory->clientInfo[directory->numClients-1].name << " Number " << directory->numClients << endl;
-				//Set the semaphore to open
-				semctl(semid,0,SETVAL,1);
-				return true;
-			}
-			else
-			{
-				directory->numClients=directory->numClients-1;
-			}
 
+		//Get access to the semaphore
+		getAccess(semid,0);
+
+		cout << "Child got into semaphore" << endl;
+		//Set the semaphore to closed
+		semctl(semid,0,SETVAL,0);
+		if(directory->numClients<10 && nameNotTaken(buffer,directory))
+		{
+			strcpy(directory->clientInfo[directory->numClients-1].name,buffer);
+			//directory->numClients=directory->numClients+1;
+			cout << "CLIENT " << directory->clientInfo[directory->numClients-1].name << " Number " << directory->numClients << endl;
+			//Give access to the semaphore
+			giveAccess(semid,0);
+			return true;
 		}
-	//Set the semaphore to open
-	semctl(semid,0,SETVAL,1);
+		else
+		{
+			directory->numClients=directory->numClients-1;
+		}
+
+		
+	//Give access to the semaphore
+	giveAccess(semid,0);
 	return false;
+}
+
+void addCliNet(int cliSockFd,struct sockaddr_in *client_info,struct dir *directory,int semid)
+{
+	getAccess(semid,0);
+	cout << "Adding net info for client " << directory->clientInfo[directory->numClients-1].name << endl;
+	directory->clientInfo[directory->numClients-1].serverAddr.sin_family = client_info->sin_family;
+	directory->clientInfo[directory->numClients-1].serverAddr.sin_addr.s_addr = client_info->sin_addr.s_addr;
+	directory->clientInfo[directory->numClients-1].serverAddr.sin_port = client_info->sin_port;
+	giveAccess(semid,0);
 }
 
 bool nameNotTaken(char buffer[],struct dir *directory)
@@ -261,7 +275,7 @@ bool nameNotTaken(char buffer[],struct dir *directory)
 	cout << "number of clients when checking for names:" << directory->numClients <<endl;
 	for(int i=0;i<directory->numClients-1;i++)
 	{
-		cout << "Buffer:" << buffer << " like " << directory->clientInfo[i].name << endl;
+		
 		if(strcasecmp(buffer,directory->clientInfo[i].name)==0)
 		{
 			cout << "NAME ALREADY TAKEN" << endl;
@@ -271,4 +285,49 @@ bool nameNotTaken(char buffer[],struct dir *directory)
 	}
 	cout << "NAME AVAILABLE" << endl;
 	return true;
+}
+
+
+int getFreePort(int semid,int semNum,struct dir *directory)
+{
+	getAccess(semid,0);
+	for(int i=0;i<MAX_USERS;i++)
+	{
+		if(directory->portAvailable[i])
+		{
+			directory->portAvailable[i]=false;
+			return directory->portNums[i];
+		}
+	}
+	giveAccess(semid,0);
+
+}
+
+//If sem_op is negative then a value is subtracted from the semaphore
+//If semaphore is 0 then it is locked
+void getAccess(int semid,int semNum){
+	struct sembuf flag;
+	flag.sem_num = semNum;
+	flag.sem_op = -1;
+	flag.sem_flg = 0;
+
+	if(semop(semid, &flag,1) == -1)
+	{
+		perror("getAccess to semaphore failed");
+	}
+
+}
+
+//If sem_op is positive then a value is added to the semaphore
+//If semaphore is 1 then it is open
+void giveAccess(int semid,int semNum){
+	struct sembuf flag;
+	flag.sem_num = semNum;
+	flag.sem_op = 1;
+	flag.sem_flg = 0;
+
+	if(semop(semid, &flag,1) == -1)
+	{
+		perror("giveAccess to semaphore failed");
+	}
 }
