@@ -14,7 +14,7 @@
     @author Brendan Lilly
     @date March 2017
 */
-
+#include <string>
 #include <iostream>
 #include <sys/wait.h>
 #include <stdlib.h>
@@ -29,12 +29,15 @@
 #include <sys/shm.h>
 #include <fcntl.h>
 #include <sys/sem.h>
+#include <arpa/inet.h>
+
 using namespace std;
 
 //Constant to set the buffer size as needed
 #define BUFFER_SIZE 500
 #define MAX_USERS 10
 #define SERV_HOST_ADDR "156.12.127.18"
+#define SHARED_MEM_SEM 0
 //15080-15089
 
 //Structs
@@ -52,7 +55,13 @@ struct dir
 	client clientInfo[MAX_USERS];
 	int numClients;
 	int portNums[MAX_USERS];
-	bool portAvailable[MAX_USERS]; 
+	bool portAvailable[MAX_USERS];
+};
+
+struct packet
+{
+	int portNum;
+	int numClients;
 };
 
 //Prototypes
@@ -62,6 +71,10 @@ void getAccess(int semid,int semNum);
 void giveAccess(int semid,int semNum);
 void addCliNet(int cliSockFd,struct sockaddr_in *client_info,struct dir *directory,int semid);
 int getFreePort(int semid,int semNum,struct dir *directory);
+string intToString(int num);
+void waitForClientInput(int cliSockFd,struct dir *directory,int semid);
+string charBuffertoString(char buffer[]);
+bool checkForClientInDir(struct dir *directory,int semid,struct sockaddr_in &lookupResult,string name);
 /**Main method that starts the application
          @return 0 in success
                 */
@@ -71,6 +84,7 @@ int main(int argc, char* argv[]){
 	void *shmptr;
 	socklen_t cliLen;
 	struct sockaddr_in server,client;
+	struct packet local;
 	char buffer[BUFFER_SIZE];
 	//struct dir directory;
 
@@ -82,7 +96,7 @@ int main(int argc, char* argv[]){
 	//Create semid
  	semid = semget(getuid(), 1, 0600|IPC_CREAT);
 	//Set the semaphore to open
-	semctl(semid,0,SETVAL,1);
+	semctl(semid,SHARED_MEM_SEM,SETVAL,1);
 
 	//Initialize some values in dir
 	directory->numClients=0;
@@ -134,6 +148,7 @@ while(true){
 		else
 		{
 			cout << "Accepted connection from: " << client.sin_port << endl;
+			cout << "Accepted connection from: " << inet_ntoa(client.sin_addr) << endl;
 		}
 
 		//Child
@@ -145,11 +160,12 @@ while(true){
 				//CLIENT IS OKAY
 				cout << "Client added to directory asking for client sockaddr" << endl;
 
-				//int port=getFreePort(semid,0,directory);
-				//cout << "PORT" << port;
-				bzero(buffer,BUFFER_SIZE);
-				strcpy(buffer,"OK");
-				if((send(cliSockFd,buffer,sizeof(buffer),0))<0){
+				int port=getFreePort(semid,SHARED_MEM_SEM,directory);
+				local.portNum = port;
+				local.numClients=directory->numClients;
+				void *addrPtr=(void *) &local;
+				cout << "PORT" << port << endl;
+				if((send(cliSockFd,addrPtr,sizeof(local),0))<0){
 					perror("WRITE TO CLIENT FAILED");
 					exit(0);
 				}
@@ -164,25 +180,24 @@ while(true){
 					{
 						perror("READ CALL FAILED");
 					}
-					else if(input>0)
-					{
-						buffer[input]='\0';
 
-					}
+					struct sockaddr_in *client_info=(struct sockaddr_in*) &ptr;
+					cout << client_info->sin_port << endl;
+					addCliNet(cliSockFd,client_info,directory,semid);
+					waitForClientInput(cliSockFd,directory,semid);
 
-						struct sockaddr_in *client_info=(struct sockaddr_in*) &ptr;
-						addCliNet(cliSockFd,&client,directory,semid);
-						
 				}
 
 			}
 			else
 			{
-				cout << "Client not added to directory" << endl;
-				bzero(buffer,BUFFER_SIZE);
-				strcpy(buffer,"No");
+				local.portNum = 0;
+				local.numClients=directory->numClients;
+				void *addrPtr=(void *) &local;
 
-				if((send(cliSockFd,buffer,strlen(buffer),0))<0){
+				cout << "Client not added to directory" << endl;
+
+				if((send(cliSockFd,addrPtr,sizeof(local),0))<0){
 					perror("WRITE TO CLIENT FAILED");
 					exit(0);
 				}
@@ -205,13 +220,13 @@ while(true){
 			close(cliSockFd);
 			//Get access to the semaphore
 
-			getAccess(semid,0);
+			getAccess(semid,SHARED_MEM_SEM);
 			cout << "Parent got in semaphore : num clients incremented in parent" << endl;
 			directory->numClients=directory->numClients+1;
 
 			//Give access to the semaphore
-			giveAccess(semid,0);
-			
+			giveAccess(semid,SHARED_MEM_SEM);
+
 
 		}
 
@@ -235,18 +250,16 @@ bool addCliToDir(int cliSockFd,char buffer[],struct dir *directory,int semid)
 		}
 
 		//Get access to the semaphore
-		getAccess(semid,0);
+		getAccess(semid,SHARED_MEM_SEM);
 
 		cout << "Child got into semaphore" << endl;
-		//Set the semaphore to closed
-		semctl(semid,0,SETVAL,0);
 		if(directory->numClients<10 && nameNotTaken(buffer,directory))
 		{
 			strcpy(directory->clientInfo[directory->numClients-1].name,buffer);
 			//directory->numClients=directory->numClients+1;
 			cout << "CLIENT " << directory->clientInfo[directory->numClients-1].name << " Number " << directory->numClients << endl;
 			//Give access to the semaphore
-			giveAccess(semid,0);
+			giveAccess(semid,SHARED_MEM_SEM);
 			return true;
 		}
 		else
@@ -254,20 +267,21 @@ bool addCliToDir(int cliSockFd,char buffer[],struct dir *directory,int semid)
 			directory->numClients=directory->numClients-1;
 		}
 
-		
+
 	//Give access to the semaphore
-	giveAccess(semid,0);
+	giveAccess(semid,SHARED_MEM_SEM);
 	return false;
 }
 
 void addCliNet(int cliSockFd,struct sockaddr_in *client_info,struct dir *directory,int semid)
 {
-	getAccess(semid,0);
+	getAccess(semid,SHARED_MEM_SEM);
 	cout << "Adding net info for client " << directory->clientInfo[directory->numClients-1].name << endl;
+	cout << client_info->sin_port << endl;
 	directory->clientInfo[directory->numClients-1].serverAddr.sin_family = client_info->sin_family;
 	directory->clientInfo[directory->numClients-1].serverAddr.sin_addr.s_addr = client_info->sin_addr.s_addr;
 	directory->clientInfo[directory->numClients-1].serverAddr.sin_port = client_info->sin_port;
-	giveAccess(semid,0);
+	giveAccess(semid,SHARED_MEM_SEM);
 }
 
 bool nameNotTaken(char buffer[],struct dir *directory)
@@ -275,7 +289,7 @@ bool nameNotTaken(char buffer[],struct dir *directory)
 	cout << "number of clients when checking for names:" << directory->numClients <<endl;
 	for(int i=0;i<directory->numClients-1;i++)
 	{
-		
+
 		if(strcasecmp(buffer,directory->clientInfo[i].name)==0)
 		{
 			cout << "NAME ALREADY TAKEN" << endl;
@@ -290,16 +304,21 @@ bool nameNotTaken(char buffer[],struct dir *directory)
 
 int getFreePort(int semid,int semNum,struct dir *directory)
 {
-	getAccess(semid,0);
+	cout << "Entered getFreePort" << endl;
+	getAccess(semid,SHARED_MEM_SEM);
+	cout << "getFreePort: Got access" << endl;
 	for(int i=0;i<MAX_USERS;i++)
 	{
+		cout << "getFreePort: Loop" << i << endl;
 		if(directory->portAvailable[i])
 		{
 			directory->portAvailable[i]=false;
+			giveAccess(semid,semNum);
+			cout << "Leaving getFreePort" << endl;
 			return directory->portNums[i];
 		}
 	}
-	giveAccess(semid,0);
+	giveAccess(semid,SHARED_MEM_SEM);
 
 }
 
@@ -330,4 +349,92 @@ void giveAccess(int semid,int semNum){
 	{
 		perror("giveAccess to semaphore failed");
 	}
+}
+
+string intToString(int num)
+{
+		 ostringstream stream;
+     stream << num;
+     return stream.str();
+}
+
+string charBuffertoString(char buffer[])
+{
+	string message=buffer;
+	return message;
+}
+
+
+void waitForClientInput(int cliSockFd,struct dir *directory,int semid)
+{
+	char buffer[BUFFER_SIZE];
+	while(true)
+	{
+
+		int input;
+		if((input = recv(cliSockFd,buffer,BUFFER_SIZE,0))<0)
+			{
+				perror("READ CALL FAILED");
+			}
+		else if(input>0)
+			{
+
+				buffer[input]='\0';
+			}
+
+			cout << charBuffertoString(buffer) << endl;
+			struct sockaddr_in lookupResult;
+
+			if(checkForClientInDir(directory,semid,lookupResult,charBuffertoString(buffer)))
+			{
+				cout << "CLI FOUND" << endl;
+				cout << "port" << lookupResult.sin_port << endl;
+
+				void *addrPtr=(void *)&lookupResult;
+				//struct sockaddr_in *client_info=(struct sockaddr_in*) &addrPtr;
+				//cout << "port after assignment" << client_info->sin_port << endl;
+				if((send(cliSockFd,addrPtr,sizeof(lookupResult),0))<0){
+						perror("WRITE TO SERVER FAILED");
+						exit(0);
+					}
+				else{
+
+				}
+			}
+			else
+			{
+				cout << "Cli Not Found" << endl;
+				lookupResult.sin_port=0;
+				void *addrPtr=(void *)&lookupResult;
+				if((send(cliSockFd,addrPtr,sizeof(lookupResult),0))<0){
+						perror("WRITE TO SERVER FAILED");
+						exit(0);
+					}
+				else{
+
+				}
+			}
+	}
+}
+
+bool checkForClientInDir(struct dir *directory,int semid,struct sockaddr_in &lookupResult,string name)
+{
+	cout << "checkForClientInDir" << endl;
+	getAccess(semid,SHARED_MEM_SEM);
+	cout << "checkForClientInDir GOT ACCESS" << endl;
+	cout << "Num clients:" << directory->numClients << endl;
+	for(int i=0;i<directory->numClients;i++)
+	{
+		cout << "names["<<i<< "]:" << directory->clientInfo[i].name << endl;
+		if(strcasecmp(name.c_str(),directory->clientInfo[i].name)==0)
+		{
+			lookupResult=directory->clientInfo[i].serverAddr;
+			giveAccess(semid,SHARED_MEM_SEM);
+			return true;
+		}
+
+	}
+
+	giveAccess(semid,SHARED_MEM_SEM);
+	return false;
 }
